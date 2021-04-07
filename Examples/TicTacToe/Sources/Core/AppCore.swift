@@ -16,53 +16,59 @@ public enum AppAction: Equatable {
   case newGame(NewGameAction)
 }
 
-public struct AppEnvironment {
-  public var authenticationClient: AuthenticationClient
-  public var mainQueue: AnySchedulerOf<DispatchQueue>
+public struct AppReducer: ReducerProtocol {
+  public var combined: AnyReducer<AppState, AppAction>
 
-  public init(
-    authenticationClient: AuthenticationClient,
-    mainQueue: AnySchedulerOf<DispatchQueue>
-  ) {
-    self.authenticationClient = authenticationClient
-    self.mainQueue = mainQueue
+  public init(authenticationClient: AuthenticationClient, mainQueue: AnySchedulerOf<DispatchQueue>) {
+    self.combined = Reducers.Combine3(
+      LoginReducer(
+        authenticationClient: authenticationClient,
+        mainQueue: mainQueue
+      )
+      .optional()
+      .pullback(
+        state: \.login,
+        action: /AppAction.login
+      ),
+      NewGameReducer()
+        .optional()
+        .pullback(
+          state: \.newGame,
+          action: /AppAction.newGame
+        ),
+      Main(authenticationClient: authenticationClient, mainQueue: mainQueue)
+    )
+    .eraseToAnyReducer()
+  }
+
+  public func run(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
+    combined.run(&state, action)
+  }
+
+  struct Main: ReducerProtocol {
+    var authenticationClient: AuthenticationClient
+    var mainQueue: AnySchedulerOf<DispatchQueue>
+
+    func run(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
+      switch action {
+      case let .login(.twoFactor(.twoFactorResponse(.success(response)))),
+           let .login(.loginResponse(.success(response))):
+        guard !response.twoFactorRequired else { return .none }
+        state.newGame = NewGameState()
+        state.login = nil
+        return .none
+
+      case .login:
+        return .none
+
+      case .newGame(.logoutButtonTapped):
+        state.newGame = nil
+        state.login = LoginState()
+        return .none
+
+      case .newGame:
+        return .none
+      }
+    }
   }
 }
-
-public let appReducer = Reducer<AppState, AppAction, AppEnvironment>.combine(
-  loginReducer.optional().pullback(
-    state: \.login,
-    action: /AppAction.login,
-    environment: {
-      LoginEnvironment(
-        authenticationClient: $0.authenticationClient,
-        mainQueue: $0.mainQueue
-      )
-    }
-  ),
-  newGameReducer.optional().pullback(
-    state: \.newGame,
-    action: /AppAction.newGame,
-    environment: { _ in NewGameEnvironment() }
-  ),
-  Reducer { state, action, _ in
-    switch action {
-    case let .login(.twoFactor(.twoFactorResponse(.success(response)))),
-      let .login(.loginResponse(.success(response))) where !response.twoFactorRequired:
-      state.newGame = NewGameState()
-      state.login = nil
-      return .none
-
-    case .login:
-      return .none
-
-    case .newGame(.logoutButtonTapped):
-      state.newGame = nil
-      state.login = LoginState()
-      return .none
-
-    case .newGame:
-      return .none
-    }
-  }
-)

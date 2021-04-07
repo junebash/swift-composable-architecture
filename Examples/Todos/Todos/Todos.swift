@@ -32,21 +32,27 @@ enum AppAction: Equatable {
   case todo(id: UUID, action: TodoAction)
 }
 
-struct AppEnvironment {
+struct AppReducer: ReducerProtocol {
   var mainQueue: AnySchedulerOf<DispatchQueue>
   var uuid: () -> UUID
-}
+  var todoReducer: TodoReducer
 
-let appReducer = Reducer<AppState, AppAction, AppEnvironment>.combine(
-  todoReducer.forEach(
-    state: \.todos,
-    action: /AppAction.todo(id:action:),
-    environment: { _ in TodoEnvironment() }
-  ),
-  Reducer { state, action, environment in
+  func run(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
+    return .merge(
+      todoReducer.forEach(
+        state: \.todos,
+        action: /AppAction.todo(id:action:)
+      )
+      .run(&state, action),
+
+      main(&state, action)
+    )
+  }
+
+  func main(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
     switch action {
     case .addTodoButtonTapped:
-      state.todos.insert(Todo(id: environment.uuid()), at: 0)
+      state.todos.insert(Todo(id: uuid()), at: 0)
       return .none
 
     case .clearCompletedButtonTapped:
@@ -68,7 +74,7 @@ let appReducer = Reducer<AppState, AppAction, AppEnvironment>.combine(
     case let .move(source, destination):
       state.todos.move(fromOffsets: source, toOffset: destination)
       return Effect(value: .sortCompletedTodos)
-        .delay(for: .milliseconds(100), scheduler: environment.mainQueue)
+        .delay(for: .milliseconds(100), scheduler: mainQueue)
         .eraseToEffect()
 
     case .sortCompletedTodos:
@@ -78,15 +84,13 @@ let appReducer = Reducer<AppState, AppAction, AppEnvironment>.combine(
     case .todo(id: _, action: .checkBoxToggled):
       struct TodoCompletionId: Hashable {}
       return Effect(value: .sortCompletedTodos)
-        .debounce(id: TodoCompletionId(), for: 1, scheduler: environment.mainQueue.animation())
+        .debounce(id: TodoCompletionId(), for: 1, scheduler: mainQueue.animation())
 
     case .todo:
       return .none
     }
   }
-)
-
-.debugActions(actionFormat: .labelsOnly)
+}
 
 struct AppView: View {
   struct ViewState: Equatable {
@@ -190,10 +194,10 @@ struct AppView_Previews: PreviewProvider {
     AppView(
       store: Store(
         initialState: AppState(todos: .mock),
-        reducer: appReducer,
-        environment: AppEnvironment(
+        reducer: AppReducer(
           mainQueue: DispatchQueue.main.eraseToAnyScheduler(),
-          uuid: UUID.init
+          uuid: UUID.init,
+          todoReducer: TodoReducer()
         )
       )
     )

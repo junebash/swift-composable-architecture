@@ -11,15 +11,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     options connectionOptions: UIScene.ConnectionOptions
   ) {
     self.window = (scene as? UIWindowScene).map(UIWindow.init(windowScene:))
-
+    let reducer = AppReducer(
+      mainQueue: DispatchQueue.main.eraseToAnyScheduler(),
+      uuid: UUID.init,
+      todoReducer: TodoReducer()
+    ).debugActions(actionFormat: .labelsOnly)
     let rootView = AppView(
       store: Store(
         initialState: AppState(),
-        reducer: appReducer,
-        environment: AppEnvironment(
-          mainQueue: DispatchQueue.main.eraseToAnyScheduler(),
-          uuid: UUID.init
-        )
+        reducer: reducer
       )
     )
 

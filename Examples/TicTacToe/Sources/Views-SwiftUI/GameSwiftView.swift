@@ -101,8 +101,7 @@ struct Game_Previews: PreviewProvider {
       GameView(
         store: Store(
           initialState: GameState(oPlayerName: "Blob Jr.", xPlayerName: "Blob Sr."),
-          reducer: gameReducer,
-          environment: GameEnvironment()
+          reducer: GameReducer()
         )
       )
     }

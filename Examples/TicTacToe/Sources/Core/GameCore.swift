@@ -45,32 +45,32 @@ public enum GameAction: Equatable {
   case quitButtonTapped
 }
 
-public struct GameEnvironment {
+public struct GameReducer: ReducerProtocol {
   public init() {}
-}
+  
+  public func run(_ state: inout GameState, _ action: GameAction) -> Effect<GameAction, Never> {
+    switch action {
+    case let .cellTapped(row, column):
+      guard
+        state.board[row][column] == nil,
+        !state.board.hasWinner
+      else { return .none }
 
-public let gameReducer = Reducer<GameState, GameAction, GameEnvironment> { state, action, _ in
-  switch action {
-  case let .cellTapped(row, column):
-    guard
-      state.board[row][column] == nil,
-      !state.board.hasWinner
-    else { return .none }
+      state.board[row][column] = state.currentPlayer
 
-    state.board[row][column] = state.currentPlayer
+      if !state.board.hasWinner {
+        state.currentPlayer.toggle()
+      }
 
-    if !state.board.hasWinner {
-      state.currentPlayer.toggle()
+      return .none
+
+    case .playAgainButtonTapped:
+      state = GameState(oPlayerName: state.oPlayerName, xPlayerName: state.xPlayerName)
+      return .none
+
+    case .quitButtonTapped:
+      return .none
     }
-
-    return .none
-
-  case .playAgainButtonTapped:
-    state = GameState(oPlayerName: state.oPlayerName, xPlayerName: state.xPlayerName)
-    return .none
-
-  case .quitButtonTapped:
-    return .none
   }
 }
 

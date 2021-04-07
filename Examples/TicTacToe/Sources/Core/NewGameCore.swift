@@ -19,10 +19,52 @@ public enum NewGameAction: Equatable {
   case xPlayerNameChanged(String)
 }
 
-public struct NewGameEnvironment {
+public struct NewGameReducer: ReducerProtocol {
   public init() {}
+
+  public func run(_ state: inout NewGameState, _ action: NewGameAction) -> Effect<NewGameAction, Never> {
+    switch action {
+    case .game(.quitButtonTapped):
+      state.game = nil
+      return .none
+
+    case .gameDismissed:
+      state.game = nil
+      return .none
+
+    case .game:
+      return .none
+
+    case .letsPlayButtonTapped:
+      state.game = GameState(
+        oPlayerName: state.oPlayerName,
+        xPlayerName: state.xPlayerName
+      )
+      return .none
+
+    case .logoutButtonTapped:
+      return .none
+
+    case let .oPlayerNameChanged(name):
+      state.oPlayerName = name
+      return .none
+
+    case let .xPlayerNameChanged(name):
+      state.xPlayerName = name
+      return .none
+    }
+  }
+
+  public func withGame() -> AnyReducer<NewGameState, NewGameAction> {
+    GameReducer()
+      .optional()
+      .pullback(state: \.game, action: /NewGameAction.game)
+      .combined(with: self)
+      .eraseToAnyReducer()
+  }
 }
 
+/*
 public let newGameReducer =
   gameReducer
   .optional()
@@ -65,3 +107,5 @@ public let newGameReducer =
       }
     }
   )
+
+*/

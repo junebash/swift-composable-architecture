@@ -25,14 +25,36 @@ enum GameType: Identifiable {
   var id: Self { self }
 }
 
+//    state: \.login,
+//    action: /AppAction.login,
+//    environment: {
+//      LoginEnvironment(
+//        authenticationClient: $0.authenticationClient,
+//        mainQueue: $0.mainQueue
+//      )
+//    }
+//  ),
+//  newGameReducer.optional().pullback(
+//    state: \.newGame,
+//    action: /AppAction.newGame,
+//    environment: { _ in NewGameEnvironment() }
+//  ),
+
 struct RootView: View {
+//  let store = Store(
+//    initialState: AppState(),
+//    reducer: appReducer.debug(),
+//    environment: AppEnvironment(
+//      authenticationClient: .live,
+//      mainQueue:
+//    )
+//  )
   let store = Store(
     initialState: AppState(),
-    reducer: appReducer.debug(),
-    environment: AppEnvironment(
+    reducer: AppReducer(
       authenticationClient: .live,
       mainQueue: DispatchQueue.main.eraseToAnyScheduler()
-    )
+    ).debug()
   )
 
   @State var showGame: GameType?
