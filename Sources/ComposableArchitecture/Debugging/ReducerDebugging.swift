@@ -135,6 +135,120 @@ extension Reducer {
   }
 }
 
+public extension Reducers {
+  struct Debug<Upstream: ReducerProtocol, LocalState, LocalAction>: ReducerProtocol {
+    public var upstream: Upstream
+    public var prefix: String
+    public var toLocalState: (Upstream.State) -> LocalState
+    public var toLocalAction: CasePath<Action, LocalAction>
+    public var actionFormat: ActionFormat
+    public var printer: (String) -> Void
+    public var queue: DispatchQueue
+
+    public init(
+      upstream: Upstream,
+      prefix: String,
+      toLocalState: @escaping (Upstream.State) -> LocalState,
+      toLocalAction: CasePath<Upstream.Action, LocalAction>,
+      actionFormat: ActionFormat,
+      environment: DebugEnvironment
+    ) {
+      self.upstream = upstream
+      self.prefix = prefix
+      self.toLocalState = toLocalState
+      self.toLocalAction = toLocalAction
+      self.actionFormat = actionFormat
+      self.printer = environment.printer
+      self.queue = environment.queue
+    }
+
+    public func run(
+      _ state: inout Upstream.State,
+      _ action: Upstream.Action
+    ) -> Effect<Upstream.Action, Never> {
+      #if DEBUG
+      let previousState = toLocalState(state)
+      let effects = upstream.run(&state, action)
+      guard let localAction = toLocalAction.extract(from: action) else { return effects }
+      let nextState = toLocalState(state)
+      return .merge(
+        .fireAndForget {
+          queue.async {
+            let actionOutput =
+              actionFormat == .prettyPrint
+              ? debugOutput(localAction).indent(by: 2)
+              : debugCaseOutput(localAction).indent(by: 2)
+            let stateOutput =
+              LocalState.self == Void.self
+              ? ""
+              : debugDiff(previousState, nextState).map { "\($0)\n" } ?? "  (No state changes)\n"
+            printer(
+              """
+                \(prefix.isEmpty ? "" : "\(prefix): ")received action:
+                \(actionOutput)
+                \(stateOutput)
+                """
+            )
+          }
+        },
+        effects
+      )
+      #else
+      return upstream.run(&state, action)
+      #endif
+    }
+  }
+}
+
+public extension ReducerProtocol {
+  func debug<LocalState, LocalAction>(
+    _ prefix: String = "",
+    state toLocalState: @escaping (State) -> LocalState,
+    action toLocalAction: CasePath<Action, LocalAction>,
+    actionFormat: ActionFormat = .prettyPrint,
+    environment: DebugEnvironment = .init()
+  ) -> Reducers.Debug<Self, LocalState, LocalAction> {
+    .init(
+      upstream: self,
+      prefix: prefix,
+      toLocalState: toLocalState,
+      toLocalAction: toLocalAction,
+      actionFormat: actionFormat,
+      environment: environment
+    )
+  }
+
+  func debug(
+    _ prefix: String = "",
+    actionFormat: ActionFormat = .prettyPrint,
+    environment: DebugEnvironment = .init()
+  ) -> Reducers.Debug<Self, State, Action> {
+    .init(
+      upstream: self,
+      prefix: prefix,
+      toLocalState: { $0 },
+      toLocalAction: .self,
+      actionFormat: actionFormat,
+      environment: environment
+    )
+  }
+
+  func debugActions(
+    _ prefix: String = "",
+    actionFormat: ActionFormat = .prettyPrint,
+    environment: DebugEnvironment = .init()
+  ) -> Reducers.Debug<Self, Void, Action> {
+    .init(
+      upstream: self,
+      prefix: prefix,
+      toLocalState: { _ in () },
+      toLocalAction: .self,
+      actionFormat: actionFormat,
+      environment: environment
+    )
+  }
+}
+
 /// An environment for debug-printing reducers.
 public struct DebugEnvironment {
   public var printer: (String) -> Void

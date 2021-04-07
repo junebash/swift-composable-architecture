@@ -32,6 +32,14 @@ public final class Store<State, Action> {
     )
   }
 
+  public convenience init<R: ReducerProtocol>(initialState: State, reducer: R)
+  where R.State == State, R.Action == Action {
+    self.init(
+      initialState: initialState,
+      reducer: reducer.run
+    )
+  }
+
   /// Scopes the store to one that exposes local state and actions.
   ///
   /// This can be useful for deriving new stores to hand to child views in an application. For

@@ -54,6 +54,49 @@ extension Reducer {
   }
 }
 
+extension Reducers {
+  public struct Signpost<Upstream: ReducerProtocol>: ReducerProtocol {
+    public var upstream: Upstream
+    var prefix: String
+    public var log: OSLog
+
+    public init(
+      upstream: Upstream,
+      prefix: String = "",
+      log: OSLog = OSLog(
+        subsystem: "co.pointfree.composable-architecture",
+        category: "Reducer Instrumentation"
+      )
+    ) {
+      self.upstream = upstream
+      // NB: Prevent rendering as "N/A" in Instruments
+      let zeroWidthSpace = "\u{200B}"
+      self.prefix = prefix.isEmpty ? zeroWidthSpace : "[\(prefix)] "
+      self.log = log
+    }
+
+    public func run(
+      _ state: inout Upstream.State,
+      _ action: Upstream.Action
+    ) -> Effect<Upstream.Action, Never> {
+      var actionOutput: String!
+      if log.signpostsEnabled {
+        actionOutput = debugCaseOutput(action)
+        os_signpost(.begin, log: log, name: "Action", "%s%s", prefix, actionOutput)
+      }
+      let effects = upstream.run(&state, action)
+      if log.signpostsEnabled {
+        os_signpost(.end, log: log, name: "Action")
+        return
+          effects
+          .effectSignpost(prefix, log: log, actionOutput: actionOutput)
+          .eraseToEffect()
+      }
+      return effects
+    }
+  }
+}
+
 extension Publisher where Failure == Never {
   func effectSignpost(
     _ prefix: String,
