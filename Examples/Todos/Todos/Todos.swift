@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import SwiftUI
+import Combine
 
 enum Filter: LocalizedStringKey, CaseIterable, Hashable {
   case all = "All"
@@ -32,24 +33,11 @@ enum AppAction: Equatable {
   case todo(id: UUID, action: TodoAction)
 }
 
-struct AppReducer: ReducerProtocol {
+struct MainAppReducer: ReducerProtocol {
   var mainQueue: AnySchedulerOf<DispatchQueue>
   var uuid: () -> UUID
-  var todoReducer: TodoReducer
 
   func run(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
-    return .merge(
-      todoReducer.forEach(
-        state: \.todos,
-        action: /AppAction.todo(id:action:)
-      )
-      .run(&state, action),
-
-      main(&state, action)
-    )
-  }
-
-  func main(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
     switch action {
     case .addTodoButtonTapped:
       state.todos.insert(Todo(id: uuid()), at: 0)
@@ -89,6 +77,92 @@ struct AppReducer: ReducerProtocol {
     case .todo:
       return .none
     }
+  }
+}
+
+struct AppReducer: ReducerProtocol {
+  let upstream: AnyReducer<AppState, AppAction>
+
+  init(mainQueue: AnySchedulerOf<DispatchQueue>, uuid: @escaping () -> UUID) {
+    self.upstream = TodoReducer()
+      .forEach(state: \.todos, action: /AppAction.todo(id:action:))
+      .combined(
+        with: MainAppReducer(mainQueue: mainQueue, uuid: uuid)
+      )
+      .eraseToAnyReducer()
+  }
+
+  func run(_ state: inout AppState, _ action: AppAction) -> Effect<AppAction, Never> {
+    upstream.run(&state, action)
+  }
+}
+
+public struct AnalyticsClient {
+  var log: (String) -> Effect<Never, Error>
+
+  public struct Error: Swift.Error, CustomStringConvertible {
+    public private(set) var description: String = ""
+  }
+
+  static let mock = AnalyticsClient { str in
+    .fireAndForget { print(str) }
+  }
+}
+
+extension ReducerProtocol {
+  func analytics(
+    client: AnalyticsClient,
+    log: @escaping (State, Action) -> String = {
+      "state: \($0)\naction:\($1)"
+    },
+    handleError: @escaping (AnalyticsClient.Error) -> Action? = { _ in nil }
+  ) -> AnalyticsReducer<Self> {
+    .init(
+      upstream: self,
+      client: client,
+      log: log,
+      handleError: handleError
+    )
+  }
+}
+
+public struct AnalyticsReducer<Upstream: ReducerProtocol>: ReducerProtocol {
+  var upstream: Upstream
+  var log: (Upstream.State, Upstream.Action) -> String
+  var handleError: (AnalyticsClient.Error) -> Upstream.Action?
+  var client: AnalyticsClient
+
+  public init(
+    upstream: Upstream,
+    client: AnalyticsClient,
+    log: @escaping (Upstream.State, Upstream.Action) -> String = {
+      "state: \($0)\naction:\($1)"
+    },
+    handleError: @escaping (AnalyticsClient.Error) -> Upstream.Action? = { _ in nil }
+  ) {
+    self.upstream = upstream
+    self.log = log
+    self.handleError = handleError
+    self.client = client
+  }
+
+  public func run(
+    _ state: inout Upstream.State,
+    _ action: Upstream.Action
+  ) -> Effect<Upstream.Action, Never> {
+    let effects = upstream.run(&state, action)
+    let logText = log(state, action)
+    let logEffects = client.log(logText)
+      .fireAndForget(
+        outputType: Upstream.Action.self,
+        failureType: AnalyticsClient.Error.self
+      )
+      .catch { (error: AnalyticsClient.Error) -> AnyPublisher<Upstream.Action, Never> in
+        handleError(error)
+          .map { Just($0).eraseToAnyPublisher() }
+          ?? Empty().eraseToAnyPublisher()
+      }.eraseToEffect()
+    return .merge(effects, logEffects)
   }
 }
 
@@ -195,10 +269,10 @@ struct AppView_Previews: PreviewProvider {
       store: Store(
         initialState: AppState(todos: .mock),
         reducer: AppReducer(
-          mainQueue: DispatchQueue.main.eraseToAnyScheduler(),
-          uuid: UUID.init,
-          todoReducer: TodoReducer()
+          mainQueue: .immediate,
+          uuid: UUID.init
         )
+        .analytics(client: .mock)
       )
     )
   }
